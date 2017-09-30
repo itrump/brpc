@@ -1,40 +1,149 @@
 # BUILD
 
-brpc prefers static linking if possible, so that deps don't have to be installed on every
-machine running the code. 
+brpc prefers static linking of deps, so that they don't have to be installed on every machine running the app.
+
+brpc depends on following packages:
+
+* [gflags](https://github.com/gflags/gflags): Extensively used to define global options.
+* [protobuf](https://github.com/google/protobuf): Serializations of messages, interfaces of services.
+* [leveldb](https://github.com/google/leveldb): Required by [/rpcz](rpcz.md) to record RPCs for tracing.
 
 ## Ubuntu/LinuxMint/WSL
-### compile
-1. install common deps: git g++ make libssl-dev
-2. install gflags protobuf leveldb: libgflags-dev libprotobuf-dev libprotoc-dev protobuf-compiler libleveldb-dev. If you need to statically link leveldb, install libsnappy-dev as well.
-3. git clone this repo. cd into the repo and run
+### Prepare deps
+
+Install common deps:
+```
+$ sudo apt-get install git g++ make libssl-dev
+```
+
+Install [gflags](https://github.com/gflags/gflags), [protobuf](https://github.com/google/protobuf), [leveldb](https://github.com/google/leveldb):
+```
+$ sudo apt-get install libgflags-dev libprotobuf-dev libprotoc-dev protobuf-compiler libleveldb-dev
+```
+
+If you need to statically link leveldb:
+```
+$ sudo apt-get install libsnappy-dev
+```
+
+### Compile brpc
+git clone brpc, cd into the repo and run
 ```
 $ sh config_brpc.sh --headers=/usr/include --libs=/usr/lib
+$ make
 ```
-4. make
+To change compiler to clang, add `--cxx=clang++ --cc=clang`.
 
-### run example
+To not link debugging symbols, add `--nodebugsymbols` and compiled binaries will be much smaller.
+
+### Run example
+
 ```
 $ cd example/echo_c++
 $ make
 $ ./echo_server &
 $ ./echo_client
 ```
+Examples link brpc statically, if you need to link the shared version, `make clean` and `LINK_SO=1 make`
 
-### run examples with cpu/heap profilers
-Install libgoogle-perftools-dev and re-run config_brpc.sh before compiling
+To run examples with cpu/heap profilers, install `libgoogle-perftools-dev` and re-run `config_brpc.sh` before compiling.
 
-### compile tests
-Install gmock and gtest, use the gtest embedded in gmock and don't install libgtest-dev
+### Run tests
+Install and compile libgtest-dev (which is not compiled yet):
+
+```shell
+sudo apt-get install libgtest-dev
+cd /usr/src/gtest && sudo cmake . && sudo make && sudo mv libgtest* /usr/lib/
 ```
-$ sudo apt-get install google-mock
-$ cd /usr/src
-$ sudo cmake .
-$ sudo make
-$ sudo mv lib*.a gtest/lib*.a /usr/lib
-$ sudo mv gtest/include/gtest /usr/include/
+
+The directory of gtest source code may be changed, try `/usr/src/googletest/googletest` if `/usr/src/gtest` is not there.
+
+Rerun `config_brpc.sh`, `make` in test/, and `sh run_tests.sh`
+
+## Fedora/CentOS
+
+### Prepare deps
+
+CentOS needs to install EPEL generally otherwise many packages are not available by default.
 ```
-Rerun config_brpc.sh and run make in test/
+sudo yum install epel-release
+```
+
+Install common deps:
+```
+sudo yum install git g++ make openssl-devel
+```
+
+Install [gflags](https://github.com/gflags/gflags), [protobuf](https://github.com/google/protobuf), [leveldb](https://github.com/google/leveldb):
+```
+sudo yum install gflags-devel protobuf-devel protobuf-compiler leveldb-devel
+```
+### Compile brpc
+
+git clone brpc, cd into the repo and run
+
+```
+$ sh config_brpc.sh --headers=/usr/include --libs=/usr/lib64
+$ make
+```
+To change compiler to clang, add `--cxx=clang++ --cc=clang`.
+
+To not link debugging symbols, add `--nodebugsymbols` and compiled binaries will be much smaller.
+
+### Run example
+
+```
+$ cd example/echo_c++
+$ make
+$ ./echo_server &
+$ ./echo_client
+```
+Examples link brpc statically, if you need to link the shared version, `make clean` and `LINK_SO=1 make`
+
+To run examples with cpu/heap profilers, install `gperftools-devel` and re-run `config_brpc.sh` before compiling.
+
+### Run tests
+
+Install gtest-devel.
+
+Rerun `config_brpc.sh`, `make` in test/, and `sh run_tests.sh`
+
+## Linux with self-built deps
+
+### Prepare deps
+
+brpc builds itself to both static and shared libs by default, so it needs static and shared libs of deps to be built as well.
+
+Take [gflags](https://github.com/gflags/gflags) as example, which does not build shared lib by default, you need to pass options to `cmake` to change the behavior:
+```
+cmake . -DBUILD_SHARED_LIBS=1 -DBUILD_STATIC_LIBS=1
+make
+```
+
+### Compile brpc
+
+Keep on with the gflags example, let `../gflags_dev` be where gflags is cloned.
+
+git clone brpc. cd into the repo and run
+
+```
+$ sh config_brpc.sh --headers="../gflags_dev /usr/include" --libs="../gflags_dev /usr/lib64"
+$ make
+```
+
+To change compiler to clang, add `--cxx=clang++ --cc=clang`.
+
+To not link debugging symbols, add `--nodebugsymbols` and compiled binaries will be much smaller.
+
+Here we pass multiple paths to `--headers` and `--libs` to make the script search for multiple places. You can also group all deps and brpc into one directory, then pass the directory to --headers/--libs which actually search all subdirectories recursively and will find necessary files.
+
+```
+$ ls my_dev
+gflags_dev protobuf_dev leveldb_dev brpc_dev
+$ cd brpc_dev
+$ sh config_brpc.sh --headers=.. --libs=..
+$ make
+```
 
 # Supported deps
 
@@ -58,7 +167,7 @@ no known issues.
 
 ## protobuf: 2.4-3.2
 
-Be compatible with pb 3.0 and pb 2.x with the same file: 
+Be compatible with pb 3.0 and pb 2.x with the same file:
 Don't use new types in proto3 and start the proto file with `syntax="proto2";`
 [tools/add_syntax_equal_proto2_to_all.sh](https://github.com/brpc/brpc/blob/master/tools/add_syntax_equal_proto2_to_all.sh)can add `syntax="proto2"` to all proto files without it.
 protobuf 3.3-3.4 is not tested yet.
@@ -87,7 +196,7 @@ Another common issue with tcmalloc is that it does not return memory to system a
 
 If you want to use [cpu profiler](cpu_profiler.md) or [heap profiler](heap_profiler.md), do link `libtcmalloc_and_profiler.a`. These two profilers are based on tcmalloc.[contention profiler](contention_profiler.md) does not require tcmalloc.
 
-When you remove tcmalloc, not only remove the linking with tcmalloc but also the macros: `-DBRPC_ENABLE_CPU_PROFILER` and `-DBRPC_ENABLE_HEAP_PROFILER`.
+When you remove tcmalloc, not only remove the linking with tcmalloc but also the macros: `-DBRPC_ENABLE_CPU_PROFILER`.
 
 ## glog: 3.3+
 

@@ -1,3 +1,5 @@
+[English version](../en/client.md)
+
 # 示例程序
 
 Echo的[client端代码](https://github.com/brpc/brpc/blob/master/example/echo_c++/client.cpp)。
@@ -447,14 +449,11 @@ r34717后Controller.has_backup_request()获知是否发送过backup_request。
 **重试时框架会尽量避开之前尝试过的server。**
 
 重试的触发条件有(条件之间是AND关系）：
-- 连接出错。如果server一直没有返回，但连接没有问题，这种情况下不会重试。如果你需要在一定时间后发送另一个请求，使用backup request。
-- 没到超时。
-- 有剩余重试次数。Controller.set_max_retry(0)或ChannelOptions.max_retry = 0可关闭重试。
-- 重试对错误可能有效。比如请求有错时(EREQUEST)不会重试，因为server总不会接受，没有意义。
-
 ### 连接出错
 
-如果server一直没有返回，但连接没有问题，这种情况下不会重试。如果你需要在一定时间后发送另一个请求，使用backup request，工作机制如下：如果response没有在backup_request_ms内返回，则发送另外一个请求，哪个先回来就取哪个。新请求会被尽量送到不同的server。如果backup_request_ms大于超时，则backup request总不会被发送。backup request会消耗一次重试次数。backup request不意味着server端cancel。
+如果server一直没有返回，但连接没有问题，这种情况下不会重试。如果你需要在一定时间后发送另一个请求，使用backup request。
+
+工作机制如下：如果response没有在backup_request_ms内返回，则发送另外一个请求，哪个先回来就取哪个。新请求会被尽量送到不同的server。注意如果backup_request_ms大于超时，则backup request总不会被发送。backup request会消耗一次重试次数。backup request不意味着server端cancel。
 
 ChannelOptions.backup_request_ms影响该Channel上所有RPC，单位毫秒，默认值-1（表示不开启），Controller.set_backup_request_ms()可修改某次RPC的值。
 
@@ -462,17 +461,16 @@ ChannelOptions.backup_request_ms影响该Channel上所有RPC，单位毫秒，�
 
 超时后RPC会尽快结束。
 
-### 没有超过最大重试次数
+### 有剩余重试次数
 
-Controller.set_max_retry()或ChannelOptions.max_retry设置最大重试次数，设为0关闭重试。
+Controller.set_max_retry(0)或ChannelOptions.max_retry=0关闭重试。
 
 ### 错误值得重试
 
-一些错误重试是没有意义的，就不会重试，比如请求有错时(EREQUEST)不会重试，因为server总不会接受。
+一些错误重试是没有意义的，就不会重试，比如请求有错时(EREQUEST)不会重试，因为server总不会接受,没有意义。
 
-r32009后用户可以通过继承[brpc::RetryPolicy](https://github.com/brpc/brpc/blob/master/src/brpc/retry_policy.h)自定义重试条件。r34642后通过cntl->response()可获得对应RPC的response。对ERPCTIMEDOUT代表的RPC超时总是不重试，即使RetryPolicy中允许。
+用户可以通过继承[brpc::RetryPolicy](https://github.com/brpc/brpc/blob/master/src/brpc/retry_policy.h)自定义重试条件。比如brpc默认不重试HTTP相关的错误，而你的程序中希望在碰到HTTP_STATUS_FORBIDDEN (403)时重试，可以这么做：
 
-比如brpc默认不重试HTTP相关的错误，而你的程序中希望在碰到HTTP_STATUS_FORBIDDEN (403)时重试，可以这么做：
 ```c++
 #include <brpc/retry_policy.h>
  
@@ -497,26 +495,32 @@ options.retry_policy = &g_my_retry_policy;
 ...
 ```
 
+一些提示：
+
+* 通过cntl->response()可获得对应RPC的response。
+* 对ERPCTIMEDOUT代表的RPC超时总是不重试，即使你继承的RetryPolicy中允许。
+
 ### 重试应当保守
 
-由于成本的限制，大部分线上server的冗余度是有限的，更多是满足多机房互备的需求。而激进的重试逻辑很容易导致众多client对server集群造成2-3倍的压力，最终使集群雪崩：由于server来不及处理导致队列越积越长，使所有的请求得经过很长的排队才被处理而最终超时，相当于服务停摆。r32009前重试整体上是安全的，只要连接不断RPC就不会重试，一般不会产生大量的重试请求。而r32009后引入的RetryPolicy一方面使用户可以定制重试条件，另一方面也可能使重试变成一场“风暴”。当你定制RetryPolicy时，你需要仔细考虑client和server的协作关系，并设计对应的异常测试，以确保行为符合预期。
+由于成本的限制，大部分线上server的冗余度是有限的，主要是满足多机房互备的需求。而激进的重试逻辑很容易导致众多client对server集群造成2-3倍的压力，最终使集群雪崩：由于server来不及处理导致队列越积越长，使所有的请求得经过很长的排队才被处理而最终超时，相当于服务停摆。默认的重试是比较安全的: 只要连接不断RPC就不会重试，一般不会产生大量的重试请求。用户可以通过RetryPolicy定制重试策略，但也可能使重试变成一场“风暴”。当你定制RetryPolicy时，你需要仔细考虑client和server的协作关系，并设计对应的异常测试，以确保行为符合预期。
 
 ## 协议
 
-Channel的默认协议是标准协议，可通过设置ChannelOptions.protocol换为其他协议，这个字段既接受enum也接受字符串，目前支持的有：
+Channel的默认协议是baidu_std，可通过设置ChannelOptions.protocol换为其他协议，这个字段既接受enum也接受字符串。
 
-- PROTOCOL_BAIDU_STD 或 “baidu_std"，即[标准协议](http://gollum.baidu.com/RPCSpec)，默认为单连接。
+目前支持的有：
+
+- PROTOCOL_BAIDU_STD 或 “baidu_std"，即[百度标准协议](baidu_std.md)，默认为单连接。
 - PROTOCOL_HULU_PBRPC 或 "hulu_pbrpc"，hulu的协议，默认为单连接。
 - PROTOCOL_NOVA_PBRPC 或 ”nova_pbrpc“，网盟的协议，默认为连接池。
-- PROTOCOL_HTTP 或 ”http", http协议，默认为连接池(Keep-Alive)。具体方法见[访问HTTP服务](http_client.md)。
+- PROTOCOL_HTTP 或 ”http", http 1.0或1.1协议，默认为连接池(Keep-Alive)。具体方法见[访问HTTP服务](http_client.md)。
 - PROTOCOL_SOFA_PBRPC 或 "sofa_pbrpc"，sofa-pbrpc的协议，默认为单连接。
 - PROTOCOL_PUBLIC_PBRPC 或 "public_pbrpc"，public_pbrpc的协议，默认为连接池。
 - PROTOCOL_UBRPC_COMPACK 或 "ubrpc_compack"，public/ubrpc的协议，使用compack打包，默认为连接池。具体方法见[ubrpc (by protobuf)](ub_client.md)。相关的还有PROTOCOL_UBRPC_MCPACK2或ubrpc_mcpack2，使用mcpack2打包。
-- PROTOCOL_NSHEAD_CLIENT 或 "nshead_client"，这是发送brpc-ub中所有UBXXXRequest需要的协议，默认为连接池。具体方法见[访问ub](ub_client.md)。
-- PROTOCOL_NSHEAD 或 "nshead"，这是brpc中发送NsheadMessage需要的协议，默认为连接池。注意发送NsheadMessage的效果等同于发送brpc-ub中的UBRawBufferRequest，但更加方便一点。具体方法见[nshead+blob](ub_client.md#nshead-blob) 。
+- PROTOCOL_NSHEAD_CLIENT 或 "nshead_client"，这是发送baidu-rpc-ub中所有UBXXXRequest需要的协议，默认为连接池。具体方法见[访问UB](ub_client.md)。
+- PROTOCOL_NSHEAD 或 "nshead"，这是发送NsheadMessage需要的协议，默认为连接池。具体方法见[nshead+blob](ub_client.md#nshead-blob) 。
 - PROTOCOL_MEMCACHE 或 "memcache"，memcached的二进制协议，默认为单连接。具体方法见[访问memcached](memcache_client.md)。
 - PROTOCOL_REDIS 或 "redis"，redis 1.2后的协议（也是hiredis支持的协议），默认为单连接。具体方法见[访问Redis](redis_client.md)。
-- PROTOCOL_ITP 或 "itp", 凤巢的协议，格式为nshead + control idl + user idl，使用mcpack2pb适配，默认为连接池。具体方法见[访问ITP](itp.md)。
 - PROTOCOL_NSHEAD_MCPACK 或 "nshead_mcpack", 顾名思义，格式为nshead + mcpack，使用mcpack2pb适配，默认为连接池。
 - PROTOCOL_ESP 或 "esp"，访问使用esp协议的服务，默认为连接池。
 
@@ -524,17 +528,17 @@ Channel的默认协议是标准协议，可通过设置ChannelOptions.protocol�
 
 brpc支持以下连接方式：
 
-- 短连接：每次RPC call前建立连接，结束后关闭连接。由于每次调用得有建立连接的开销，这种方式一般用于偶尔发起的操作，而不是持续发起请求的场景。
-- 连接池：每次RPC call前取用空闲连接，结束后归还，一个连接上最多只有一个请求，对一台server可能有多条连接。各类使用nshead的协议和http 1.1都是这个方式。
-- 单连接：进程内与一台server最多一个连接，一个连接上可能同时有多个请求，回复返回顺序和请求顺序不需要一致，这是标准协议，hulu-pbrpc，sofa-pbrpc的默认选项。
+- 短连接：每次RPC前建立连接，结束后关闭连接。由于每次调用得有建立连接的开销，这种方式一般用于偶尔发起的操作，而不是持续发起请求的场景。没有协议默认使用这种连接方式，http 1.0对连接的处理效果类似短链接。
+- 连接池：每次RPC前取用空闲连接，结束后归还，一个连接上最多只有一个请求，一个client对一台server可能有多条连接。http 1.1和各类使用nshead的协议都是这个方式。
+- 单连接：进程内所有client与一台server最多只有一个连接，一个连接上可能同时有多个请求，回复返回顺序和请求顺序不需要一致，这是baidu_std，hulu_pbrpc，sofa_pbrpc协议的默认选项。
 
-|            | 短连接                                      | 连接池                 | 单连接               |
-| ---------- | ---------------------------------------- | ------------------- | ----------------- |
-| 长连接        | 否 （每次都要建立tcp连接）                          | 是                   | 是                 |
-| server端连接数 | qps*latency (原理见[little's law](https://en.wikipedia.org/wiki/Little%27s_law)) | qps*latency         | 1                 |
-| 极限qps      | 差，且受限于单机端口数                              | 中等                  | 高                 |
-| latency    | 1.5RTT(connect) + 1RTT + 处理时间            | 1RTT + 处理时间         | 1RTT + 处理时间       |
-| cpu占用      | 高每次都要tcp connect                         | 中等每个请求都要一次sys write | 低合并写出在大流量时减少cpu占用 |
+|                     | 短连接                                      | 连接池                   | 单连接                 |
+| ------------------- | ---------------------------------------- | --------------------- | ------------------- |
+| 长连接                 | 否                                        | 是                     | 是                   |
+| server端连接数(单client) | qps*latency (原理见[little's law](https://en.wikipedia.org/wiki/Little%27s_law)) | qps*latency           | 1                   |
+| 极限qps               | 差，且受限于单机端口数                              | 中等                    | 高                   |
+| latency             | 1.5RTT(connect) + 1RTT + 处理时间            | 1RTT + 处理时间           | 1RTT + 处理时间         |
+| cpu占用               | 高, 每次都要tcp connect                       | 中等, 每个请求都要一次sys write | 低, 合并写出在大流量时减少cpu占用 |
 
 框架会为协议选择默认的连接方式，用户**一般不用修改**。若需要，把ChannelOptions.connection_type设为：
 
@@ -550,11 +554,11 @@ brpc支持以下连接方式：
 
 - 设置为“”（空字符串）则让框架选择协议对应的默认连接方式。
 
-r31468之后brpc支持[Streaming RPC](streaming_rpc.md)，这是一种应用层的连接，用于传递流式数据。
+brpc支持[Streaming RPC](streaming_rpc.md)，这是一种应用层的连接，用于传递流式数据。
 
 ## 关闭连接池中的闲置连接
 
-当连接池中的某个连接在-idle_timeout_second时间内没有读写，则被视作“闲置”，会被自动关闭。打开-log_idle_connection_close后关闭前会打印一条日志。默认值为10秒。此功能只对连接池(pooled)有效。
+当连接池中的某个连接在-idle_timeout_second时间内没有读写，则被视作“闲置”，会被自动关闭。默认值为10秒。此功能只对连接池(pooled)有效。打开-log_idle_connection_close在关闭前会打印一条日志。
 
 | Name                      | Value | Description                              | Defined At              |
 | ------------------------- | ----- | ---------------------------------------- | ----------------------- |
@@ -588,31 +592,16 @@ r31468之后brpc支持[Streaming RPC](streaming_rpc.md)，这是一种应用层�
 
 ## log_id
 
-通过set_log_id()可设置log_id。这个id会被送到服务器端，一般会被打在日志里，从而把一次检索经过的所有服务串联起来。不同产品线可能有不同的叫法。一些产品线有字符串格式的“s值”，内容也是64位的16进制数，可以转成整型后再设入log_id。
+通过set_log_id()可设置64位整型log_id。这个id会和请求一起被送到服务器端，一般会被打在日志里，从而把一次检索经过的所有服务串联起来。字符串格式的需要转化为64位整形才能设入log_id。
 
 ## 附件
 
-标准协议和hulu协议支持附件，这段数据由用户自定义，不经过protobuf的序列化。站在client的角度，设置在Controller::request_attachment()的附件会被server端收到，response_attachment()则包含了server端送回的附件。附件不受压缩选项影响。
+baidu_std和hulu_pbrpc协议支持附件，这段数据由用户自定义，不经过protobuf的序列化。站在client的角度，设置在Controller::request_attachment()的附件会被server端收到，response_attachment()则包含了server端送回的附件。附件不受压缩选项影响。
 
 在http协议中，附件对应[message body](http://www.w3.org/Protocols/rfc2616/rfc2616-sec4.html)，比如要POST的数据就设置在request_attachment()中。
 
-## giano认证
-```
-
-// Create a baas::CredentialGenerator using Giano's API
-baas::CredentialGenerator generator = CREATE_MOCK_PERSONAL_GENERATOR(
-    "mock_user", "mock_roles", "mock_group", baas::sdk::BAAS_OK);
- 
-// Create a brpc::policy::GianoAuthenticator using the generator we just created 
-// and then pass it into brpc::ChannelOptions
-brpc::policy::GianoAuthenticator auth(&generator, NULL);
-brpc::ChannelOptions option;
-option.auth = &auth;
-```
-首先通过调用Giano API生成验证器baas::CredentialGenerator，具体可参看[Giano快速上手手册.pdf](http://wiki.baidu.com/download/attachments/37774685/Giano%E5%BF%A
-B%E9%80%9F%E4%B8%8A%E6%89%8B%E6%89%8B%E5%86%8C.pdf?version=1&modificationDate=1421990746000&api=v2)。然后按照如上代码一步步将其设置到brpc::ChannelOptions里去。
-
-当client设置认证后，任何一个新连接建立后都必须首先发送一段验证信息（通过Giano认证器生成），才能发送后续请求。认证成功后，该连接上的后续请求不会再带有验证消息。
+## 认证
+TODO: Describe how authentication methods are extended.
 
 ## 重置
 
@@ -622,7 +611,11 @@ B%E9%80%9F%E4%B8%8A%E6%89%8B%E6%89%8B%E5%86%8C.pdf?version=1&modificationDate=14
 
 ## 压缩
 
-set_request_compress_type()设置request的压缩方式，默认不压缩。注意：附件不会被压缩。HTTP body的压缩方法见[client压缩request body](http_client#压缩request-body)。
+set_request_compress_type()设置request的压缩方式，默认不压缩。
+
+注意：附件不会被压缩。
+
+HTTP body的压缩方法见[client压缩request body](http_client#压缩request-body)。
 
 支持的压缩方法有：
 
@@ -668,13 +661,13 @@ set_request_compress_type()设置request的压缩方式，默认不压缩。注�
 
 ### Q: brpc能用unix domain socket吗
 
-不能。因为同机socket并不走网络，相比domain socket性能只会略微下降，替换为domain socket意义不大。以后可能会扩展支持。
+不能。同机TCP socket并不走网络，相比unix domain socket性能只会略微下降。一些不能用TCP socket的特殊场景可能会需要，以后可能会扩展支持。
 
-### Q: Fail to connect to xx.xx.xx.xx:xxxx, Connection refused是什么意思
+### Q: Fail to connect to xx.xx.xx.xx:xxxx, Connection refused
 
 一般是对端server没打开端口（很可能挂了）。 
 
-### Q: 经常遇到Connection timedout(不在一个机房)
+### Q: 经常遇到至另一个机房的Connection timedout
 
 ![img](../images/connection_timedout.png)
 
@@ -698,33 +691,29 @@ struct ChannelOptions {
 };
 ```
 
-注意连接超时不是RPC超时，RPC超时打印的日志是"Reached timeout=..."。
+注意: 连接超时不是RPC超时，RPC超时打印的日志是"Reached timeout=..."。
 
 ### Q: 为什么同步方式是好的，异步就crash了
 
-重点检查Controller，Response和done的生命周期。在异步访问中，RPC调用结束并不意味着RPC整个过程结束，而是要在done被调用后才会结束。所以这些对象不应在调用RPC后就释放，而是要在done里面释放。所以你一般不能把这些对象分配在栈上，而应该使用NewCallback等方式分配在堆上。详见[异步访问](client.md#异步访问)。
+重点检查Controller，Response和done的生命周期。在异步访问中，RPC调用结束并不意味着RPC整个过程结束，而是在进入done->Run()时才会结束。所以这些对象不应在调用RPC后就释放，而是要在done->Run()里释放。你一般不能把这些对象分配在栈上，而应该分配在堆上。详见[异步访问](client.md#异步访问)。
 
-### Q: 我怎么确认server处理了我的请求
+### Q: 怎么确保请求只被处理一次
 
-不一定能。当response返回且成功时，我们确认这个过程一定成功了。当response返回且失败时，我们确认这个过程一定失败了。但当response没有返回时，它可能失败，也可能成功。如果我们选择重试，那一个成功的过程也可能会被再执行一次。所以一般来说RPC服务都应当考虑[幂等](http://en.wikipedia.org/wiki/Idempotence)问题，否则重试可能会导致多次叠加副作用而产生意向不到的结果。比如以读为主的检索服务大都没有副作用而天然幂等，无需特殊处理。而像写也很多的存储服务则要在设计时就加入版本号或序列号之类的机制以拒绝已经发生的过程，保证幂等。
+这不是RPC层面的事情。当response返回且成功时，我们确认这个过程一定成功了。当response返回且失败时，我们确认这个过程一定失败了。但当response没有返回时，它可能失败，也可能成功。如果我们选择重试，那一个成功的过程也可能会被再执行一次。一般来说带副作用的RPC服务都应当考虑[幂等](http://en.wikipedia.org/wiki/Idempotence)问题，否则重试可能会导致多次叠加副作用而产生意向不到的结果。只有读的检索服务大都没有副作用而天然幂等，无需特殊处理。而带写的存储服务则要在设计时就加入版本号或序列号之类的机制以拒绝已经发生的过程，保证幂等。
 
-### Q: BNS中机器列表已经配置了,但是RPC报"Fail to select server, No data available"错误
-
-使用get_instance_by_service -s your_bns_name 来检查一下所有机器的status状态，  只有status为0的机器才能被client访问.
-
-### Q: Invalid address=`bns://group.user-persona.dumi.nj03'是什么意思
+### Q: Invalid address=`bns://group.user-persona.dumi.nj03'
 ```
 FATAL 04-07 20:00:03 7778 src/brpc/channel.cpp:123] Invalid address=`bns://group.user-persona.dumi.nj03'. You should use Init(naming_service_name, load_balancer_name, options) to access multiple servers.
 ```
-访问bns要使用三个参数的Init，它第二个参数是load_balancer_name，而你这里用的是两个参数的Init，框架当你是访问单点，就会报这个错。
+访问名字服务要使用三个参数的Init，其中第二个参数是load_balancer_name，而这里用的是两个参数的Init，框架认为是访问单点，就会报这个错。
 
-### Q: 两个产品线都使用protobuf，为什么不能互相访问
+### Q: 两端都用protobuf，为什么不能互相访问
 
-协议 !=protobuf。protobuf负责打包，协议负责定字段。打包格式相同不意味着字段可以互通。协议中可能会包含多个protobuf包，以及额外的长度、校验码、magic number等等。协议的互通是通过在RPC框架内转化为统一的编程接口完成的，而不是在protobuf层面。从广义上来说，protobuf也可以作为打包框架使用，生成其他序列化格式的包，像[idl<=>protobuf](mcpack2pb.md)就是通过protobuf生成了解析idl的代码。
+**协议 !=protobuf**。protobuf负责一个包的序列化，协议中的一个消息可能会包含多个protobuf包，以及额外的长度、校验码、magic number等等。打包格式相同不意味着协议可以互通。在brpc中写一份代码就能服务多协议的能力是通过把不同协议的数据转化为统一的编程接口完成的，而不是在protobuf层面。
 
 ### Q: 为什么C++ client/server 能够互相通信， 和其他语言的client/server 通信会报序列化失败的错误
 
-检查一下C++ 版本是否开启了压缩 (Controller::set_compress_type), 目前 python/JAVA版的rpc框架还没有实现压缩，互相返回会出现问题。 
+检查一下C++ 版本是否开启了压缩 (Controller::set_compress_type), 目前其他语言的rpc框架还没有实现压缩，互相返回会出现问题。 
 
 # 附:Client端基本流程
 
@@ -735,13 +724,13 @@ FATAL 04-07 20:00:03 7778 src/brpc/channel.cpp:123] Invalid address=`bns://group
 1. 创建一个[bthread_id](https://github.com/brpc/brpc/blob/master/src/bthread/id.h)作为本次RPC的correlation_id。
 2. 根据Channel的创建方式，从进程级的[SocketMap](https://github.com/brpc/brpc/blob/master/src/brpc/socket_map.h)中或从[LoadBalancer](https://github.com/brpc/brpc/blob/master/src/brpc/load_balancer.h)中选择一台下游server作为本次RPC发送的目的地。
 3. 根据连接方式（单连接、连接池、短连接），选择一个[Socket](https://github.com/brpc/brpc/blob/master/src/brpc/socket.h)。
-4. 如果开启验证且当前Socket没有被验证过时，第一个请求进入验证分支，其余请求会阻塞直到第一个包含认证信息的请求写入Socket。这是因为server端只对第一个请求进行验证。
+4. 如果开启验证且当前Socket没有被验证过时，第一个请求进入验证分支，其余请求会阻塞直到第一个包含认证信息的请求写入Socket。server端只对第一个请求进行验证。
 5. 根据Channel的协议，选择对应的序列化函数把request序列化至[IOBuf](https://github.com/brpc/brpc/blob/master/src/butil/iobuf.h)。
-6. 如果配置了超时，设置定时器。从这个点开始要避免使用Controller对象，因为在设定定时器后->有可能触发超时机制->调用到用户的异步回调->用户在回调中析构Controller。
+6. 如果配置了超时，设置定时器。从这个点开始要避免使用Controller对象，因为在设定定时器后随时可能触发超时->调用到用户的超时回调->用户在回调中析构Controller。
 7. 发送准备阶段结束，若上述任何步骤出错，会调用Channel::HandleSendFailed。
 8. 将之前序列化好的IOBuf写出到Socket上，同时传入回调Channel::HandleSocketFailed，当连接断开、写失败等错误发生时会调用此回调。
-9. 如果是同步发送，Join correlation_id；如果是异步则至此client端返回。
+9. 如果是同步发送，Join correlation_id；否则至此CallMethod结束。
 10. 网络上发消息+收消息。
 11. 收到response后，提取出其中的correlation_id，在O(1)时间内找到对应的Controller。这个过程中不需要查找全局哈希表，有良好的多核扩展性。
 12. 根据协议格式反序列化response。
-13. 调用Controller::OnRPCReturned，其中会根据错误码判断是否需要重试。如果是异步发送，调用用户回调。最后摧毁correlation_id唤醒Join着的线程。
+13. 调用Controller::OnRPCReturned，可能会根据错误码判断是否需要重试，或让RPC结束。如果是异步发送，调用用户回调。最后摧毁correlation_id唤醒Join着的线程。
